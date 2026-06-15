@@ -1,0 +1,28 @@
+# Compiled binaries
+nbody_serial
+nbody_parallel
+nbody_hybrid
+gen_input
+hello_mpi
+tests/compare_csv
+tests/energy_check
+*.o
+
+# Run outputs
+tests/out/
+data/frames/
+data/*.csv
+
+# LaTeX build artifacts
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.nav
+report/*.snm
+report/*.vrb
+report/*.bbl
+report/*.blg
+report/*.fls
+report/*.fdb_latexmk
+report/*.synctex.gz

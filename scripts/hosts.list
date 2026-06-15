@@ -1,0 +1,5 @@
+# scripts/hosts.list - one hostname per line. Must resolve via /etc/hosts.
+# Used by setup_ssh.sh and distribute.sh.
+node1
+node2
+node3

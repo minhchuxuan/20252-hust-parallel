@@ -1,0 +1,6 @@
+# scripts/etc-hosts.template - copy to /etc/hosts on every node (or feed to
+# provision.sh via HOSTS_FILE=...). Replace the 192.168.x.* IPs with the
+# ones your router/hotspot actually assigned.
+192.168.1.11  node1
+192.168.1.12  node2
+192.168.1.13  node3
