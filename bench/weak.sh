@@ -8,7 +8,7 @@
 #
 # Usage:
 #   ./bench/weak.sh [N0=4000] [STEPS=20] [DT=0.01] [HOSTFILE]
-# Env: NPS="1 2 4 8" REPEATS=3
+# Env: NPS="1 2 4 8 16" REPEATS=3
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source bench/_lib.sh
@@ -18,7 +18,7 @@ STEPS="${2:-20}"
 DT="${3:-0.01}"
 HOSTFILE="${4:-}"
 REPEATS="${REPEATS:-3}"
-NPS="${NPS:-1 2 4 8}"
+NPS="${NPS:-1 2 4 8 16}"
 
 mpiargs=(--oversubscribe ${EXTRA:-})
 [[ -n "$HOSTFILE" ]] && mpiargs=(-hostfile "$HOSTFILE" --oversubscribe ${EXTRA:-})

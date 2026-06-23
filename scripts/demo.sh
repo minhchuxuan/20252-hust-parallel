@@ -11,13 +11,13 @@ set -euo pipefail
 N="${N:-2048}"
 STEPS="${STEPS:-50}"
 DT="${DT:-0.01}"
-NP="${NP:-3}"
+NP="${NP:-4}"
 HOSTFILE="${HOSTFILE:-}"
 
 mkdir -p data
 # --oversubscribe lets the demo run on a single laptop (more ranks than cores).
-hostarg=(--oversubscribe)
-[[ -n "$HOSTFILE" ]] && hostarg=(-hostfile "$HOSTFILE" --oversubscribe)
+hostarg=(--oversubscribe ${EXTRA:-})
+[[ -n "$HOSTFILE" ]] && hostarg=(-hostfile "$HOSTFILE" --oversubscribe ${EXTRA:-})
 
 echo "=== [1/3] Serial reference (N=$N, steps=$STEPS) ==="
 ./nbody_serial "$N" "$STEPS" "$DT" data/final_serial.csv

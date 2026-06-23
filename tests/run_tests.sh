@@ -5,7 +5,7 @@
 #   T1  serial runs and produces finite output for a small input
 #   T2  parallel np=1 ≡ serial (bit-for-bit up to CSV formatting)
 #   T3  parallel np=2 ≈ serial (within CSV tolerance)
-#   T4  parallel np=3 ≈ serial
+#   T4  parallel np=4 ≈ serial
 #   T5  energy drift over 50 steps is bounded (< 5% for this integrator)
 #   T6  input generator round-trips via --from
 set -euo pipefail
@@ -50,9 +50,9 @@ check T3_np2_matches_serial bash -c '
   mpirun -np 2 ./nbody_parallel 128 10 0.01 tests/out/p2.csv &&
   ./tests/compare_csv tests/out/s.csv tests/out/p2.csv 1e-6 1e-9
 '
-check T4_np3_matches_serial bash -c '
-  mpirun -np 3 --oversubscribe ./nbody_parallel 128 10 0.01 tests/out/p3.csv &&
-  ./tests/compare_csv tests/out/s.csv tests/out/p3.csv 1e-6 1e-9
+check T4_np4_matches_serial bash -c '
+  mpirun -np 4 --oversubscribe ./nbody_parallel 128 10 0.01 tests/out/p4.csv &&
+  ./tests/compare_csv tests/out/s.csv tests/out/p4.csv 1e-6 1e-9
 '
 
 # T5: energy drift. Semi-implicit Euler drifts monotonically but slowly at

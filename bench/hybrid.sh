@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./bench/hybrid.sh [N=20000] [STEPS=20] [DT=0.01] [HOSTFILE]
-# Env: NPS="1 2 3"  THREADS="1 2 4"  REPEATS=3
+# Env: NPS="1 2 4"  THREADS="1 2 4"  REPEATS=3
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source bench/_lib.sh
@@ -14,11 +14,11 @@ STEPS="${2:-20}"
 DT="${3:-0.01}"
 HOSTFILE="${4:-}"
 REPEATS="${REPEATS:-3}"
-NPS="${NPS:-1 2 3}"
+NPS="${NPS:-1 2 4}"
 THREADS="${THREADS:-1 2}"
 
-mpiargs=(--oversubscribe)
-[[ -n "$HOSTFILE" ]] && mpiargs=(-hostfile "$HOSTFILE" --oversubscribe)
+mpiargs=(--oversubscribe ${EXTRA:-})
+[[ -n "$HOSTFILE" ]] && mpiargs=(-hostfile "$HOSTFILE" --oversubscribe ${EXTRA:-})
 
 OUT=bench/hybrid.csv
 mkdir -p bench

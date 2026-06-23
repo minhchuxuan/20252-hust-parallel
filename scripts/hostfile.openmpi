@@ -1,8 +1,9 @@
 # scripts/hostfile.openmpi - OpenMPI hostfile.
 # Format: "hostname slots=K" — set K to the number of physical CPU cores on that
 # host, so that one MPI rank can run per core (total ranks = total cores). Edit
-# the slot counts to match your machines. Example below: three 4-core nodes -> 12
-# ranks total. Run e.g.:  mpirun -np 12 -hostfile scripts/hostfile.openmpi ...
+# the slot counts to match your machines. Example below: four 4-core nodes -> 16
+# ranks total. Run e.g.:  mpirun -np 16 -hostfile scripts/hostfile.openmpi ...
 node1 slots=4
 node2 slots=4
 node3 slots=4
+node4 slots=4

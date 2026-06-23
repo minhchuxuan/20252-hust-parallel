@@ -3,7 +3,7 @@
 #
 # Examples:
 #   ./scripts/run.sh serial   2048 50 0.005
-#   ./scripts/run.sh parallel 2048 50 0.005  -np 3 -hostfile hosts
+#   ./scripts/run.sh parallel 2048 50 0.005  -np 4 -hostfile hosts
 set -euo pipefail
 
 mode="${1:-serial}"; shift || true

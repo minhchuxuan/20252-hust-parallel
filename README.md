@@ -2,7 +2,7 @@
 
 > Final project for **Parallel Programming (20252)** — a 4-member group
 > implementation of a gravitational N-body simulator using the Barnes-Hut
-> quadtree approximation, parallelized with MPI across a 3-node Ubuntu
+> quadtree approximation, parallelized with MPI across a 4-node Ubuntu
 > cluster. Built against the rubric in `../task.md`.
 
 ---
@@ -138,6 +138,7 @@ into `scripts/etc-hosts.template`:
 192.168.1.11  node1
 192.168.1.12  node2
 192.168.1.13  node3
+192.168.1.14  node4
 ```
 
 ### 2. Provision each node
@@ -165,16 +166,17 @@ Prompts for the worker password once per host; subsequent SSH is silent.
 
 ```sh
 make hello_mpi
-mpirun -np 3 -hostfile scripts/hostfile.openmpi ./hello_mpi
+mpirun -np 4 -hostfile scripts/hostfile.openmpi --map-by node ./hello_mpi
 ```
 
 Expected output (order may vary):
 
 ```
 [master] MPI library: Open MPI v4.x ...
-rank 0/3 on node1
-rank 1/3 on node2
-rank 2/3 on node3
+rank 0/4 on node1
+rank 1/4 on node2
+rank 2/4 on node3
+rank 3/4 on node4
 ```
 
 ### 5. Distribute the project
@@ -228,12 +230,12 @@ mpirun -np P -hostfile scripts/hostfile.openmpi \
        ./nbody_parallel N STEPS DT [OUT.csv]
 ```
 
-Example (3 nodes, 1 rank each):
+Example (4 nodes, 1 rank each):
 
 ```sh
-mpirun -np 3 -hostfile scripts/hostfile.openmpi \
+mpirun -np 4 -hostfile scripts/hostfile.openmpi --map-by node \
        ./nbody_parallel 4096 100 0.005 final.csv
-# -> "parallel n=4096 p=3 steps=100 dt=0.005  time=1.18s  build=0.46s  force=0.61s  comm=0.08s  integ=0.01s"
+# -> "parallel n=4096 p=4 steps=100 dt=0.005  time=...s  build=...s  force=...s  comm=...s  integ=...s"
 ```
 
 ### Hybrid MPI + OpenMP
@@ -243,10 +245,10 @@ integrator run under an OpenMP `parallel for`. One MPI rank per node, T
 threads per rank.
 
 ```sh
-OMP_NUM_THREADS=2 mpirun -np 3 -hostfile scripts/hostfile.openmpi \
+OMP_NUM_THREADS=4 mpirun -np 4 -hostfile scripts/hostfile.openmpi --map-by node \
       -x OMP_NUM_THREADS \
       ./nbody_hybrid 4096 100 0.005 final.csv
-# -> "hybrid n=4096 p=3 t=2 steps=100 dt=0.005 time=0.73s ..."
+# -> "hybrid n=4096 p=4 t=4 steps=100 dt=0.005 time=...s ..."
 ```
 
 Notes:
@@ -265,7 +267,7 @@ Notes:
 ./gen_input 4096 data/ic.csv 42 two           # two colliding clusters
 
 ./nbody_serial --from data/ic.csv 200 0.005 out.csv
-mpirun -np 3 -hostfile scripts/hostfile.openmpi \
+mpirun -np 4 -hostfile scripts/hostfile.openmpi --map-by node \
        ./nbody_parallel --from data/ic.csv 200 0.005 out.csv
 ```
 
@@ -275,7 +277,7 @@ mpirun -np 3 -hostfile scripts/hostfile.openmpi \
 
 ```sh
 ./scripts/run.sh serial   4096 100 0.005
-./scripts/run.sh parallel 4096 100 0.005 -np 3 -hostfile scripts/hostfile.openmpi
+./scripts/run.sh parallel 4096 100 0.005 -np 4 -hostfile scripts/hostfile.openmpi --map-by node
 ```
 
 ---
@@ -293,7 +295,7 @@ Runs `tests/run_tests.sh` which builds the comparator and executes:
 | T1 | Serial produces a CSV of the right length | exact line count |
 | T2 | `mpirun -np 1 ./nbody_parallel` ≡ serial | rtol=1e-10 |
 | T3 | `mpirun -np 2` ≈ serial (Allgather reorder OK) | rtol=1e-6 |
-| T4 | `mpirun -np 3` ≈ serial | rtol=1e-6 |
+| T4 | `mpirun -np 4` ≈ serial | rtol=1e-6 |
 | T5 | Energy drift over 50 steps < 5 % | — |
 | T6 | `gen_input` → `nbody_serial --from` round-trip | non-empty |
 
@@ -338,7 +340,7 @@ Writes `bench/weak.csv`.
 ### Hybrid grid sweep
 
 ```sh
-NPS="1 2 3" THREADS="1 2 4" make hybrid-bench \
+NPS="1 2 4" THREADS="1 2 4" make hybrid-bench \
     HOSTFILE=scripts/hostfile.openmpi N=4096 STEPS=50 DT=0.005
 ```
 
@@ -402,7 +404,7 @@ Does, live from a terminal:
 
 1. Runs the **serial reference** with N=2048, 50 steps, writing
    `data/final_serial.csv`.
-2. Runs the **MPI 3-node version** with the same parameters, writing
+2. Runs the **MPI 4-node version** with the same parameters, writing
    `data/final_parallel.csv`.
 3. Diffs the first 5 rows of both files to show they match.
 
@@ -497,8 +499,8 @@ gates wall-clock time.
   non-uniform walk depth across clustered regions.
 - **Between ranks** the protocol is identical to the pure-MPI version
   (two `Allgatherv`s per step).
-- Total parallelism is `P × T` (ranks × threads). On a 3-node cluster
-  with 2 vCPU per VM, `np=3 threads=2` exposes 6 cores.
+- Total parallelism is `P × T` (ranks × threads). On a 4-node cluster
+  with 4 cores per node, `np=4 threads=4` exposes 16 cores.
 - `MPI_Init_thread(MPI_THREAD_FUNNELED)` — only the main thread calls
   MPI, so no extra locking.
 - `ax[i]`/`ay[i]` writes are disjoint across `i`; tree reads are
@@ -514,7 +516,7 @@ gates wall-clock time.
 | `DUMP_EVERY=K` | off | Dump a CSV every K steps (serial + MPI rank 0) |
 | `DUMP_PREFIX=P` | off | Frames go to `P_0000.csv`, `P_0001.csv`, … |
 | `REPEATS=N` | 5 | Runs per data point in `bench/bench.sh` |
-| `NPS="1 2 3"` | `"1 2 3"` | Override np sweep in benchmarks |
+| `NPS="1 2 4 8 16"` | benchmark-specific | Override np sweep in benchmarks |
 | `HOSTFILE=F` | unset | Passed through `make` to mpirun via scripts |
 | `MPI_USER=u` | `$USER` | SSH target user for `setup_ssh.sh` / `distribute.sh` |
 | `CC=`, `MPICC=`, `CFLAGS=` | `gcc`, `mpicc`, `-O2 -Wall -Wextra -std=gnu11` | Compiler config |
@@ -591,7 +593,7 @@ Grand total: ≈ 1760 LOC (well above the 1000-LOC §2 floor).
   arithmetic regardless of rank, so the outputs are bit-for-bit identical
   (T2–T4 pass at rtol=1e-10). A mismatch usually means a stale binary on one
   node; rebuild and re-`distribute.sh`.
-- **Speedup plateaus below 2× at np=3** — inspect the `comm=` column from
+- **Speedup plateaus below 2× at np=4** — inspect the `comm=` column from
   `nbody_parallel`; if it dominates, reduce N or switch to non-blocking
   `Ialltoall` (see §6.3 engineering checklist).
 - **`setup_ssh.sh` hangs** — check the worker's `/etc/hosts` actually has
