@@ -3,7 +3,7 @@
 > Final project for **Parallel Programming (20252)** — a 4-member group
 > implementation of a gravitational N-body simulator using the Barnes-Hut
 > quadtree approximation, parallelized with MPI across a 4-node Ubuntu
-> cluster. Built against the rubric in `../task.md`.
+> cluster. 
 
 ---
 

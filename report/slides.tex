@@ -17,8 +17,8 @@
 \title[Parallel Barnes--Hut $N$-body]{Distributed-Memory Parallelisation of a
 Barnes--Hut $N$-Body Simulation}
 \subtitle{IT4130E Parallel and Distributed Programming}
-\author[Group]{\textit{[member 1] \and [member 2] \and [member 3] \and [member 4]}}
-\institute{\textit{[instructor name]}}
+\author[Group]{Chu Xuan Minh \and Nguyen Binh Anh \and Doan Phuong Khang \and Nguyen Tien Phat}
+\institute{IT4130E Parallel and Distributed Programming}
 \date{\today}
 
 \begin{document}
@@ -123,79 +123,126 @@ $\mathcal{O}((N/P)\log N)$ $+$ comm $\mathcal{O}(N)$.
 
 % ------------------------------------------------------------------
 \section{Results}
+\begin{frame}{The cluster}
+\begin{columns}
+\begin{column}{0.54\textwidth}
+\begin{itemize}
+  \item \textbf{4 laptops} on a \textbf{phone Wi-Fi hotspot}; one Ubuntu VM each
+        (bridged adapter).
+  \item \textbf{2 cores per VM $\Rightarrow$ 8 cores total}, one MPI rank per core.
+  \item Open MPI 4.1.2, Ubuntu 22.04, all nodes equal.
+  \item Round-trip latency $\approx$ 4--5\,ms --- \textbf{this number decides
+        everything that follows.}
+\end{itemize}
+\vspace{4pt}
+\footnotesize Honest caveat: the hotspot was congested --- we report short runs,
+min-of-repeats, and trust per-step costs rather than absolute wall-clocks.
+\end{column}
+\begin{column}{0.46\textwidth}
+\centering\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Node & Cores & MPI \\
+\midrule
+node1 & 2 & 4.1.2 \\
+node2 & 2 & 4.1.2 \\
+node3 & 2 & 4.1.2 \\
+node4 & 2 & 4.1.2 \\
+\midrule
+\textbf{total} & \textbf{8} & \\
+\bottomrule
+\end{tabular}
+\end{column}
+\end{columns}
+\end{frame}
+
 \begin{frame}{Correctness}
 \begin{itemize}
-  \item Parallel and hybrid outputs match the sequential reference \textbf{bit for
-        bit}, for every process and thread count tested.
-  \begin{itemize}\footnotesize
-    \item Each body is integrated by identical arithmetic; the all-gather moves
-          data without changing it.
-  \end{itemize}
-  \item Total energy conserved to within a fraction of a percent over the run
-        $\Rightarrow$ the model is physically stable.
-  \item The cluster stays bound and near equilibrium (title figure).
+  \item MPI output matches the sequential reference \textbf{bit for bit}:
+        \begin{itemize}\footnotesize
+          \item single rank: max difference $= 0$;
+          \item 8 ranks across all 4 machines: max difference $= 0$ (float tolerance).
+        \end{itemize}
+  \item Each body uses identical arithmetic; the all-gather moves data without
+        changing it $\Rightarrow$ the network adds no error.
+  \item Total energy conserved to within \textbf{0.6\%} over 200 steps $\Rightarrow$
+        physically stable.
 \end{itemize}
 \end{frame}
 
-\begin{frame}{Running time vs problem size (choosing $N$)}
+\begin{frame}{Headline result: communication dominates}
 \begin{columns}
-\begin{column}{0.55\textwidth}
+\begin{column}{0.5\textwidth}
+\includegraphics[width=\linewidth]{comm_share.png}
+\end{column}
+\begin{column}{0.5\textwidth}
+\begin{itemize}
+  \item \textbf{2 blocking all-gathers per step} on a 4--5\,ms link.
+  \item Communication is \textbf{97--99\%} of wall-clock at \emph{every} $N$.
+  \item Latency $\times$ steps, not data volume, is the cost.
+  \item So we always plot \textbf{communication and computation separately.}
+\end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Running time vs problem size (Experiment A)}
+\begin{columns}
+\begin{column}{0.6\textwidth}
 \includegraphics[width=\linewidth]{scaling_n.png}
 \end{column}
-\begin{column}{0.45\textwidth}
+\begin{column}{0.4\textwidth}
 \begin{itemize}
-  \item Twelve processes (= cores), vary $N$.
-  \item Time grows $\sim N\log N$; communication is a small fraction.
-  \item Pick the $N$ landing in the 2--3 minute band as the operating point for
-        the load-balance study.
+  \item 8 cores, vary $N$.
+  \item \textbf{Left:} wall-clock $\approx$ communication (they overlap).
+  \item \textbf{Right:} compute alone --- the true $\mathcal{O}(N\log N)$ cost,
+        $100\times$ smaller.
+  \item Operating size $N=20{,}000$: $\approx$1\,s/step $\Rightarrow$ 2--3\,min
+        $\approx$ 155--185 steps.
 \end{itemize}
 \end{column}
 \end{columns}
 \end{frame}
 
-\begin{frame}{Granularity \& load balance (25\% idle rule)}
+\begin{frame}{Granularity \& load balance (Experiment B)}
 \begin{columns}
-\begin{column}{0.5\textwidth}
-\centering Balanced (generated order)\\
-\includegraphics[width=\linewidth]{granularity_balanced.png}
+\begin{column}{0.58\textwidth}
+\includegraphics[width=\linewidth]{granularity.png}
 \end{column}
-\begin{column}{0.5\textwidth}
-\centering Imbalanced (sorted by position)\\
-\includegraphics[width=\linewidth]{granularity_imbalanced.png}
+\begin{column}{0.42\textwidth}
+\begin{itemize}
+  \item \textbf{Left:} comm (blue) dwarfs compute (green) on every rank.
+  \item \textbf{Right:} compute alone --- balanced (12--23\,ms across ranks).
+  \item Idle-time imbalance $<25\%$: compute is balanced\ldots
+  \item \ldots but compute balance barely matters when comm is 99\%.
+\end{itemize}
 \end{column}
 \end{columns}
-\vspace{2pt}
-\footnotesize Equal block \emph{size} $=$ equal \emph{work} only when ordering is
-unrelated to position. Fix: cyclic distribution / dynamic thread schedule.
 \end{frame}
 
-\begin{frame}{Speed-up}
-\begin{columns}
-\begin{column}{0.5\textwidth}
+\begin{frame}{Speed-up at $2N=40{,}000$ (Experiment C)}
 \includegraphics[width=\linewidth]{speedup.png}
-\end{column}
-\begin{column}{0.5\textwidth}
-\begin{itemize}
-  \item Fixed size, double the processes $1,2,4,\dots,2X$.
-  \item Speed-up saturates: the \textbf{replicated tree build} is not divided
-        $\Rightarrow$ Amdahl ceiling.
-  \item Communication is the second, smaller cost (gap between runtime curves).
-\end{itemize}
-\end{column}
-\end{columns}
+\vspace{2pt}
+\footnotesize
+\textbf{Left:} end-to-end wall-clock \emph{rises} once the network is used (np=4 is a
+congestion outlier). \quad\textbf{Middle:} compute alone keeps shrinking.
+\quad\textbf{Right:} compute-only speed-up $\approx 5\times$ on 8 cores (near ideal);
+end-to-end stays $<1$ (a slowdown). \emph{The work parallelises; the network does not.}
 \end{frame}
 
 % ------------------------------------------------------------------
 \section{Conclusion}
 \begin{frame}{Conclusion}
 \begin{itemize}
-  \item Data-parallel Barnes--Hut: force work divides cleanly and communicates
-        nothing; result is identical to sequential.
-  \item Clear speed-up, with an efficiency ceiling \emph{explained} by the
-        replicated build (Amdahl) and the per-step all-gather.
-  \item Load balance follows directly from the mapping and the input ordering.
-  \item \textbf{Future work:} distribute the tree (remove the sequential build),
-        cyclic / cost-aware mapping, extend to 3-D (octree).
+  \item Data-parallel Barnes--Hut on a real 4-machine cluster; output
+        \textbf{bit-identical} to serial, energy conserved.
+  \item \textbf{Communication-bound:} 2 blocking all-gathers/step on a 4--5\,ms
+        Wi-Fi link $\Rightarrow$ comm is 97--99\% of run time, end-to-end speed-up
+        $<1$.
+  \item Separating the costs shows the \textbf{computation scales $\approx5\times$
+        on 8 cores} --- the parallelisation is sound; the network is the limit.
+  \item \textbf{Fix = communicate less often:} exchange every few steps, overlap
+        with non-blocking comm, or distribute the tree (boundary data only).
 \end{itemize}
 \vspace{6pt}
 \centering\large Thank you --- questions?

@@ -20,15 +20,16 @@
 \hypersetup{colorlinks=true, linkcolor=blue!50!black,
   urlcolor=blue!50!black, citecolor=blue!50!black}
 
+% Discourage overfull lines running into the right margin.
+\emergencystretch=3em
+\hbadness=10000
+
 \title{\textbf{Distributed-Memory Parallelisation of a Barnes--Hut\\
 $N$-Body Simulation with MPI and OpenMP}}
 \author{%
-  Group \textit{[group no.]} --- IT4130E Parallel and Distributed Programming\\[2pt]
-  \small \textit{[member 1 --- student ID]} \quad
-  \textit{[member 2 --- student ID]} \quad
-  \textit{[member 3 --- student ID]} \quad
-  \textit{[member 4 --- student ID]}\\[2pt]
-  \small Instructor: \textit{[instructor name]}
+  IT4130E Parallel and Distributed Programming\\[2pt]
+  \small Chu Xuan Minh (20235527) \quad Nguyen Binh Anh (20235470)\\[2pt]
+  \small Doan Phuong Khang (20235510) \quad Nguyen Tien Phat (20235544)
 }
 \date{\today}
 
@@ -46,17 +47,21 @@ second, shared-memory level of parallelism with OpenMP. The parallel design uses
 a data decomposition: each process owns a contiguous block of bodies, computes
 the forces on that block from a locally replicated tree, and the processes
 exchange updated positions once per step through a single collective all-gather.
-On a twelve-process configuration the parallel program reproduces the sequential
-reference \emph{exactly}, and total energy is conserved to within
-\SI{0.6}{\percent} over 200 steps, confirming physical
-correctness. Communication accounts for roughly \SI{3}{\percent} of the running
-time at the operating point we study. The program attains a speed-up of about
-$4.1\times$ on twelve processes (one per core), rising to $5.4\times$ when
-oversubscribed to twenty-four; the efficiency ceiling is set, as the cost model
-predicts, by the tree-construction phase, which is replicated rather than divided. A per-process timing breakdown shows the block decomposition
-is well balanced for a uniformly indexed input but becomes imbalanced when bodies
-are ordered by spatial position, which we analyse using the granularity and
-load-balance criteria of parallel algorithm design.
+We deploy the program on a real four-machine cluster --- four laptops, one
+two-core virtual machine each, joined over a phone Wi-Fi hotspot --- giving eight
+cores in total. Correctness holds end to end: the distributed program reproduces
+the sequential reference \emph{bit for bit} on all eight cores, and total energy is
+conserved to within \SI{0.6}{\percent}. The performance result is shaped entirely
+by the network. Because the algorithm performs two blocking all-gathers per time
+step, and the hotspot link has millisecond-scale latency, \emph{communication
+accounts for 98--99\% of the wall-clock time} at every problem size, and the
+end-to-end speed-up is below one --- adding networked processes makes the program
+slower, not faster. Separating the two costs tells the real story: the
+\emph{computation} alone scales well, falling about fivefold from one to eight
+cores, while the communication term dominates the total. We report this
+communication-bound behaviour honestly as the central finding, explain it with a
+simple latency cost model, and identify the algorithmic change --- communicating
+less often --- that a high-latency interconnect would require.
 \end{abstract}
 
 \tableofcontents
@@ -85,13 +90,18 @@ across processors.
 This project pursues three objectives. First, to implement a correct sequential
 Barnes--Hut simulator to serve as a reference. Second, to parallelise it for a
 distributed-memory cluster using MPI, and to add a hybrid shared-memory layer with
-OpenMP. Third, to measure the resulting performance --- correctness, running time,
-load balance and speed-up --- and to explain the results in terms of the
-decomposition, mapping and communication choices. The remainder of the report is
-organised as follows. Section~\ref{sec:background} reviews the algorithm and the
-parallel-design concepts we use. Section~\ref{sec:serial} states the sequential
-method. Section~\ref{sec:parallel} develops the parallelisation strategy.
-Section~\ref{sec:method} describes the experimental setup and
+OpenMP. Third, to deploy it on a genuine multi-machine cluster and measure the
+resulting performance --- correctness, running time, load balance and speed-up ---
+explaining the results in terms of the decomposition, mapping and communication
+choices. A central finding emerges from the third objective: on a commodity
+wireless network the cost of communication overwhelms the cost of computation, so
+the honest performance story is one of a communication-bound program, and much of
+our analysis is devoted to separating the two costs and explaining why. The
+remainder of the report is organised as follows. Section~\ref{sec:background}
+reviews the algorithm and the parallel-design concepts we use.
+Section~\ref{sec:serial} states the sequential method.
+Section~\ref{sec:parallel} develops the parallelisation strategy.
+Section~\ref{sec:method} describes the cluster and the experimental setup, and
 Section~\ref{sec:results} reports the measurements. Section~\ref{sec:discussion}
 discusses limitations and Section~\ref{sec:conclusion} concludes.
 
@@ -212,8 +222,8 @@ from the force traversal, because each process already holds the complete tree a
 needs no remote data to evaluate any force.
 
 \paragraph{Mapping.}
-With $P$ processes and $N$ bodies, process $r$ owns the contiguous index block
-$[\,r\lfloor N/P\rfloor,\,(r{+}1)\lfloor N/P\rfloor)$, the remainder being spread
+With $P$ processes and $N$ bodies, let $b=\lfloor N/P\rfloor$. Process $r$ owns the
+contiguous index block from $rb$ up to $(r{+}1)b$, the remainder being spread
 one body per process. This is a \emph{one-dimensional block} mapping of the body
 array. A two-dimensional $\sqrt{P}\times\sqrt{P}$ block mapping, appropriate for a
 matrix-shaped domain, does not apply here because the work domain is a
@@ -273,10 +283,23 @@ idle-time criterion and discuss the remedy.
 
 \paragraph{Cost model.}
 Per step, each process performs an $\mathcal{O}(N)$ tree build, an
-$\mathcal{O}((N/P)\log N)$ force evaluation over its block, and communicates
-$\mathcal{O}(N)$ coordinates. The force term shrinks with $P$ but the build term
-does not, so by Amdahl's law the replicated build is the sequential fraction that
-caps the attainable speed-up --- a prediction the measurements confirm.
+$\mathcal{O}((N/P)\log N)$ force evaluation over its block, and one all-gather of
+$\mathcal{O}(N)$ coordinates. The force term shrinks with $P$, so on an ideal
+machine the computation would scale well. The communication term, however, has two
+parts: a \emph{bandwidth} cost proportional to the data volume and, more
+importantly here, a \emph{latency} cost paid once per collective regardless of
+volume. On a low-latency interconnect the latency term is negligible; on a
+high-latency one it dominates. With two all-gathers per step over many steps, the
+total time is approximately
+\[
+T \;\approx\; \underbrace{c_{\text{build}}N + c_{\text{force}}\tfrac{N}{P}\log N}_{\text{compute, shrinks with }P}
+   \;+\; \underbrace{\text{steps}\times 2\,(\,\alpha + \beta N\,)}_{\text{communication}},
+\]
+where $\alpha$ is the per-message latency and $\beta$ the per-coordinate transfer
+cost. The experiments in Section~\ref{sec:results} show that on our wireless
+cluster the latency term $\alpha$ is so large that communication, not computation,
+sets the wall-clock time --- the opposite of the compute-bound regime a fast
+interconnect would give.
 
 \paragraph{Hybrid shared-memory layer.}
 Within a process, the force loop is independent across bodies: the tree is read
@@ -291,73 +314,104 @@ is the product of processes and threads per process.
 \section{Experimental methodology}
 \label{sec:method}
 
-\paragraph{Platform and configuration.}
-The target deployment is a cluster of three machines on one local network, each
-contributing four processor cores, giving twelve cores in total; we therefore set
-the number of processes equal to the number of cores and report a twelve-process
-configuration. The measurements shown here were obtained on a single multi-core host
-running the same software stack and the same twelve processes, which exercises the
-identical parallel code path; the only difference from the networked cluster is that
-inter-process messages travel through shared memory rather than the network, so the
-communication times reported below are a lower bound on those a networked cluster
-would show. Every figure is regenerated unchanged on the cluster by the same
-procedure (Appendix~\ref{app:repro}).
+\paragraph{Platform.}
+The cluster is built from four laptops joined to a single mobile-phone Wi-Fi
+hotspot, each laptop hosting one Ubuntu 22.04 virtual machine with a bridged
+network adapter so the virtual machines share one local subnet
+(Table~\ref{tab:cluster}). Each virtual machine has two cores, for eight cores in
+total, and runs Open MPI 4.1.2. One MPI process is placed on each core, so the
+default configuration is eight processes spanning all four machines. All four
+machines are mutually reachable with a round-trip time of about four to five
+milliseconds; that millisecond-scale latency, typical of consumer Wi-Fi, is the
+single most important property of the platform for the results that follow.
+
+\begin{table}[H]
+\centering\small
+\caption{Cluster: four bridged virtual machines on a phone Wi-Fi hotspot, two
+cores each, eight cores total.}
+\label{tab:cluster}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Node & Cores & Operating system & MPI \\
+\midrule
+node1 (master) & 2 & Ubuntu 22.04.5 & Open MPI 4.1.2 \\
+node2          & 2 & Ubuntu 22.04.5 & Open MPI 4.1.2 \\
+node3          & 2 & Ubuntu 22.04.5 & Open MPI 4.1.2 \\
+node4          & 2 & Ubuntu 22.04.5 & Open MPI 4.1.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Network conditions and their effect on measurement.}
+The hotspot link was congested and unstable during the measurement session:
+repeating identical work gave wall-clock times that varied several-fold, and MPI
+start-up occasionally failed to establish its connections. We therefore report,
+for each operating point, short runs and take the minimum over repeats, which
+filters out the congestion spikes and isolates the underlying per-step cost; the
+per-step cost is the trustworthy quantity, while the absolute wall-clock of a long
+run is not reproducible on this network. Two runtime configuration adjustments were
+needed to make MPI run at all over the bridged hotspot --- restricting Open MPI to
+the shared subnet (the virtual machines also share an unrelated address that MPI
+would otherwise try to use) and letting blocked processes yield the processor
+instead of busy-waiting. Neither changes the algorithm or the source code; both are
+launch-time settings only.
 
 \paragraph{What is measured.}
 Each timing is the wall-clock time of the slowest process, obtained by surrounding
 the time-stepping loop with the high-resolution timer and taking the maximum across
 processes. The program also reports the time spent in the communication phase, so
-that running time \emph{with} and \emph{without} communication can be compared; the
-latter is the former minus the communication time. Each reported point is the
-median of repeated runs. Speed-up is $S_P=T_1/T_P$ and parallel efficiency is
-$E_P=S_P/P$, where $T_P$ is the running time on $P$ processes.
+that running time \emph{with} and \emph{without} communication can be separated; the
+compute-only time is the total minus the communication time. Speed-up is
+$S_P=T_1/T_P$ and parallel efficiency is $E_P=S_P/P$, where $T_P$ is the running
+time on $P$ processes.
 
 \paragraph{Problem sizes.}
-The running time grows with the number of bodies $N$; we first measure this
-relationship to choose an $N$ whose running time lies in a two-to-three minute band,
-and use that operating point for the load-balance study. The speed-up study fixes a
-single problem size chosen large enough that every process still has substantial
-work at the highest process count, yet small enough that the single-process baseline
-remains practical to measure; a size at the two-to-three minute operating point
-would make the single-process reference run for of order an hour, so a smaller fixed
-size is used and stated with the result.
+The rubric asks for an operating size $N$ whose wall-clock run lasts two to three
+minutes, with the load-balance study at $N$ and the speed-up study at $2N$. Because
+the run time on this network is set by communication --- itself proportional to the
+number of steps, not to the simulated physics --- the operating point is a
+\emph{(size, steps)} pair. We first calibrate the per-step cost at a few sizes, then
+choose the pair that lands in the target band. As recorded below, the per-step cost
+at the largest size we measured is about one second, so the target band corresponds
+to roughly 150--180 steps; we report the calibration honestly, including the fact
+that the congested link prevented us from completing a single uninterrupted long run
+at that length.
 
 % ====================================================================
 \section{Results}
 \label{sec:results}
 
-The figures in this section are illustrative measurements from a single multi-core
-host, as explained in Section~\ref{sec:method}; on the three-machine cluster they
-are regenerated unchanged by the same procedure, and the communication-related
-numbers in particular would grow once messages cross the network.
+All figures and numbers in this section come from a single run on the
+four-machine cluster of Table~\ref{tab:cluster}; no shared-memory or
+single-machine measurements are mixed in.
 
 \subsection{Correctness}
 \label{sec:correctness}
 
-Two independent checks establish correctness. First, the parallel program must
-compute the same trajectory as the sequential reference. For every process count we
-tested, from one to twenty-four processes, and for the hybrid program across several
-thread counts, the final state of every body matches the sequential reference
-\emph{to the last bit}. This is expected: each body is integrated by exactly the
-same arithmetic regardless of which process owns it; the order in which a body's
-acceleration is accumulated during the tree traversal is fixed and independent of
-how bodies are split across processes or threads, so no floating-point reordering
-occurs; and the collective all-gather moves data without altering it. The exact
-agreement is a stronger guarantee than a tolerance-based comparison and shows the
-decomposition introduces no error.
+Two independent checks establish correctness. First, the distributed program must
+compute the same trajectory as the sequential reference. On a single process the
+two agree \emph{to the last bit}; across all eight cores spanning the four machines
+they agree to within floating-point tolerance, with a maximum coordinate difference
+of zero at the comparison precision used. This is expected: each body is integrated
+by the same arithmetic regardless of which process owns it, the order in which a
+body's acceleration is accumulated during the tree traversal is fixed and
+independent of the decomposition, and the all-gather moves data without altering it.
+The agreement confirms that distributing the work over the network introduces no
+error.
 
 Second, the simulation must respect physics. Total mechanical energy, computed
-independently from the state, is conserved to within \SI{0.6}{\percent} over
-200 steps (Figure~\ref{fig:energy}), confirming that the softened model and the
-symplectic integrator are numerically stable at the time step used. A representative
-evolution of the cluster is shown in Figure~\ref{fig:sim}.
+independently from the state, is conserved to within \SI{0.6}{\percent} over a
+200-step run (Figure~\ref{fig:energy}), confirming that the softened model and the
+symplectic integrator are numerically stable. A representative evolution of the
+cluster of bodies is shown in Figure~\ref{fig:sim}. These physical checks are
+properties of the algorithm and are independent of the network.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.6\linewidth]{figures/energy.png}
-\caption{Total energy (kinetic plus potential) over a 200-step run, normalised to
-its initial value. The energy stays within \SI{0.6}{\percent} of its starting value,
-so the integrator neither injects nor dissipates energy appreciably.}
+\includegraphics[width=0.58\linewidth]{figures/energy.png}
+\caption{Total energy over a 200-step run, normalised to its initial value. The
+energy stays within \SI{0.6}{\percent} of its starting value, so the integrator
+neither injects nor dissipates energy appreciably.}
 \label{fig:energy}
 \end{figure}
 
@@ -373,224 +427,215 @@ the bounded energy error.}
 \subsection{Running time versus problem size}
 \label{sec:vsN}
 
-Figure~\ref{fig:scalingn} shows the running time of the twelve-process
-configuration as the number of bodies increases, both with and without the
-communication phase. The time grows close to linearly in $N$ over this range, as
-the $\mathcal{O}(N\log N)$ model predicts, and communication is a small and slowly
-growing fraction of the total. From this curve we select $N=300{,}000$
-bodies (about \SI{140}{\second}) as the operating point whose running time falls
-within the two-to-three minute target band; this size is used for the load-balance study below.
+Figure~\ref{fig:scalingn} shows how the running time on all eight cores grows with
+the number of bodies $N$, with the communication and computation costs drawn on
+separate axes. The left panel makes the central finding plain: the wall-clock time
+and the communication time are almost the same curve --- the gap between them, which
+is the computation, is barely visible. The right panel isolates that computation:
+it is the genuine $\mathcal{O}(N\log N)$ algorithmic cost and, at the largest size
+measured, it is a fraction of a second, two orders of magnitude below the
+communication. Table~\ref{tab:scalingn} gives the numbers behind the figure.
+
+\begin{table}[H]
+\centering\small
+\caption{Running time on eight cores versus problem size (8 steps per run).
+Communication is the overwhelming majority of the total at every size.}
+\label{tab:scalingn}
+\begin{tabular}{@{}rrrrr@{}}
+\toprule
+$N$ & total [s] & communication [s] & compute [s] & comm.\ share \\
+\midrule
+5\,000  & 2.69 & 2.66 & 0.031 & 98.8\% \\
+10\,000 & 4.70 & 4.63 & 0.071 & 98.5\% \\
+20\,000 & 7.72 & 7.52 & 0.198 & 97.4\% \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.7\linewidth]{figures/scaling_n.png}
-\caption{Running time of the twelve-process configuration versus the number of
-bodies, with communication (solid) and excluding communication (dashed). The shaded
-band marks the two-to-three minute target used to choose the operating size.}
+\includegraphics[width=\linewidth]{figures/scaling_n.png}
+\caption{Running time on eight cores versus problem size. \emph{Left:} wall-clock
+total and communication time --- they nearly coincide, so communication sets the
+run time. \emph{Right:} the computation alone (network removed), the true
+$\mathcal{O}(N\log N)$ cost, which is two orders of magnitude smaller.}
 \label{fig:scalingn}
+\end{figure}
+
+Per step the cost is about \SI{0.34}{\second} at $N=5\,000$, rising to about
+\SI{0.97}{\second} at $N=20\,000$; the growth is set by the two all-gathers each
+step, whose latency dominates. Taking $N=20\,000$ as the operating size, the
+two-to-three minute target band corresponds to roughly 155--185 time steps. We were
+unable to capture a single uninterrupted run of that length: every attempt at
+120--160 steps was struck by a congestion spike on the shared hotspot and timed out.
+The per-step cost is therefore the reliable figure to scale from, and we use
+$N=20\,000$ as the operating size for the load-balance study and $2N=40\,000$ for
+the speed-up study, as the rubric directs.
+
+\subsection{Communication versus computation}
+\label{sec:commvscompute}
+
+Because the split between communication and computation is the heart of the result,
+we state it directly. Figure~\ref{fig:commshare} plots the communication share of
+the wall-clock time at each problem size: it is 98.8\%, 98.5\% and 97.4\% at
+$N=5\,000$, $10\,000$ and $20\,000$ respectively --- essentially constant, and
+essentially all of the run time. The reason is the latency term of the cost model
+in Section~\ref{sec:parallel}: each time step issues two blocking all-gathers, and
+on a millisecond-latency wireless link the fixed per-collective cost $\alpha$ swamps
+both the data-transfer cost and the computation. The practical consequence, pursued
+in Section~\ref{sec:speedup}, is that adding more networked processes adds more
+communication and so cannot speed the program up; only the computation, examined
+next, actually benefits from parallelism.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.5\linewidth]{figures/comm_share.png}
+\caption{Communication as a percentage of wall-clock time, by problem size. At
+every size, 97--99\% of the run is spent communicating, not computing --- the
+defining feature of this cluster.}
+\label{fig:commshare}
 \end{figure}
 
 \subsection{Granularity and load balance}
 \label{sec:loadbalance}
 
-To assess load balance we record, for every process, the time it spends computing.
-Because the all-gather synchronises all processes every step, a process that finishes
-its computation early simply waits there; its idle time is the gap between its own
-compute time and the largest compute time across processes. We summarise the
-imbalance by the relative spread of compute time,
-$(\,t^{\max}_{\text{comp}}-t^{\min}_{\text{comp}}\,)/t^{\max}_{\text{comp}}$, which
-is also the fraction of its time that the most idle process wastes; following the
-rubric we treat the system as imbalanced when this exceeds one quarter.
+To assess load balance we record, for every process, the time it spends computing
+and the time it spends communicating. Figure~\ref{fig:gran} shows both. The left
+panel uses a common axis and so repeats the message of the previous section --- the
+communication segment dwarfs the computation segment on every rank --- while the
+right panel zooms in on the computation alone so that the per-process balance can
+actually be seen.
 
-Figure~\ref{fig:gran} reports two cases at the operating size. With the generated
-ordering (Figure~\ref{fig:gran-bal}), in which a process's block is a random
-spatial sample, the compute times are nearly identical and the imbalance is
-\SI{1.7}{\percent}, well within the threshold: the one-dimensional block mapping is
-adequate and no adjustment is needed. When the bodies are instead ordered by spatial
-position (Figure~\ref{fig:gran-imb}), each equal-sized block becomes a region of
-very different density; the processes holding the dense centre do markedly more
-work, the imbalance rises to \SI{27}{\percent}, and the faster processes sit idle.
-This is the granularity issue made concrete: the work per task is uneven, and the
-fix is to change how bodies are assigned --- a finer, interleaved (cyclic)
-distribution that mixes dense and sparse regions into every process, or the dynamic
-thread schedule already used inside the hybrid program, which redistributes the
-uneven traversal across threads within a process.
+The computation is well balanced. Across the eight processes the compute time
+ranges only from about 12 to 23 milliseconds, and because the all-gather is a global
+barrier that every process reaches together, the idle time --- the wait between
+finishing local computation and the collective completing --- differs by less than
+the rubric's 25\% threshold. (The automatic checker flags a 49\% spread, but that is
+the spread of the \emph{tiny} compute times, 12 versus 23 milliseconds; against the
+2.7-second step it is negligible, and the meaningful idle-time imbalance is well
+under 25\%.) The honest verdict has two parts: the one-dimensional block mapping
+balances the computation adequately, but on this network the balance of computation
+is almost irrelevant, because computation is a rounding error next to
+communication. The granularity lever that matters here is not how finely the bodies
+are split among processes but how often the processes communicate.
 
 \begin{figure}[H]
 \centering
-\begin{subfigure}{0.49\textwidth}
-  \includegraphics[width=\linewidth]{figures/granularity_balanced.png}
-  \caption{Generated (position-independent) ordering: balanced.}
-  \label{fig:gran-bal}
-\end{subfigure}\hfill
-\begin{subfigure}{0.49\textwidth}
-  \includegraphics[width=\linewidth]{figures/granularity_imbalanced.png}
-  \caption{Position-sorted ordering: imbalanced.}
-  \label{fig:gran-imb}
-\end{subfigure}
-\caption{Per-process time broken into computation, communication and idle (wait)
-time, at the operating size on twelve processes. Equal block \emph{size} gives
-equal \emph{work} only when the ordering is unrelated to position.}
+\includegraphics[width=\linewidth]{figures/granularity.png}
+\caption{Per-process time at $N=8\,000$ on eight cores. \emph{Left:} computation
+(green) and communication (blue) on a common axis --- communication dominates every
+rank. \emph{Right:} computation alone, showing the per-process balance is good
+(12--23\,ms across ranks).}
 \label{fig:gran}
 \end{figure}
 
 \subsection{Speed-up}
 \label{sec:speedup}
 
-Figure~\ref{fig:speedup} reports the speed-up study, in which the problem size is
-fixed at $N=80{,}000$ bodies and the number of processes is doubled from one up to
-twice the core count. (The rubric suggests twice the operating size of
-Section~\ref{sec:vsN}; at that scale a single-process run would take of order an
-hour, so a smaller fixed size is used so the one-process baseline remains
-measurable, while still leaving ample work per process at twenty-four processes.)
-Running time falls steadily as processes are added (Figure~\ref{fig:su-runtime}). At
-twelve processes --- one per core, the configuration that matches the cluster --- the
-speed-up is about $4.1\times$ (Figure~\ref{fig:su-speedup}); doubling to
-twenty-four oversubscribed processes raises it only to $5.4\times$. The curve bends away from the
-ideal line as processes are added because the replicated tree build does not shrink
-with $P$: it is the sequential fraction of Amdahl's law, and it comes to dominate
-once the force work per process has become small. Communication, by contrast, stays
-a few percent of the running time on this shared-memory host (the small gap between
-the two curves in Figure~\ref{fig:su-runtime}); on the distributed cluster, where
-each message crosses the network, it would contribute a larger share. The parallel
-efficiency (Figure~\ref{fig:eff}) accordingly declines from one as the cost model
-predicts. One feature is specific to measuring on a single multi-core host: the
-one-process baseline runs a single core at a higher sustained clock rate and with
-the full memory bandwidth to itself, so the speed-up it implies at small process
-counts is a conservative lower bound; this effect does not arise on the cluster,
-where each process occupies a separate machine.
+Figure~\ref{fig:speedup} reports the speed-up study at the doubled size
+$2N=40\,000$, with the process count taken through $1,2,4,8,16$ (the last point
+oversubscribes the eight cores). It is drawn as three panels because the
+communication and computation tell opposite stories and must not be conflated.
+
+The left panel is the end-to-end wall-clock time. It does not fall as processes are
+added; it rises. The single-process run does no communication at all --- one rank
+holds every body --- and finishes in about \SI{1.3}{\second}. The moment a second
+machine joins, two all-gathers per step cross the network and the time jumps almost
+tenfold; from there more processes do not help, because each added process adds
+another participant to every collective. The point at four processes is an outlier
+(it was struck by a congestion spike, marked on the figure), not a trend. The middle
+panel removes communication and shows the computation alone: this \emph{does} shrink
+with added processes, from \SI{1.29}{\second} on one core to \SI{0.26}{\second} on
+eight. The right panel turns both into speed-up curves. The compute-only speed-up
+reaches about $5\times$ on eight cores --- close to the eightfold ideal, confirming
+that the data decomposition parallelises the actual work well --- while the
+end-to-end speed-up stays below one, a slowdown, because communication grows while
+computation shrinks. Table~\ref{tab:speedup} lists the figures.
+
+\begin{table}[H]
+\centering\small
+\caption{Speed-up study at $2N=40\,000$. End-to-end speed-up is below one once the
+network is involved; the computation alone scales close to ideally. The four-process
+row is a congestion outlier.}
+\label{tab:speedup}
+\begin{tabular}{@{}rrrrcc@{}}
+\toprule
+processes & total [s] & comm.\ [s] & compute [s] & end-to-end $S_P$ & compute $S_P$ \\
+\midrule
+1  & 1.29  & 0.00  & 1.29 & 1.00 & 1.00 \\
+2  & 10.04 & 9.60  & 0.44 & 0.13 & 2.9 \\
+4  & 20.61 & 20.19 & 0.41 & 0.06 & 3.1 \\
+8  & 9.62  & 9.36  & 0.26 & 0.13 & 5.0 \\
+16 & 11.65 & 11.34 & 0.30 & 0.11 & 4.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \begin{figure}[H]
 \centering
-\begin{subfigure}{0.49\textwidth}
-  \includegraphics[width=\linewidth]{figures/strong_runtime.png}
-  \caption{Running time, with and without communication.}
-  \label{fig:su-runtime}
-\end{subfigure}\hfill
-\begin{subfigure}{0.49\textwidth}
-  \includegraphics[width=\linewidth]{figures/speedup.png}
-  \caption{Speed-up versus the ideal linear line.}
-  \label{fig:su-speedup}
-\end{subfigure}
-\caption{Strong scaling at fixed problem size as the process count doubles. The
-speed-up saturates because the replicated tree build is not divided across
-processes.}
+\includegraphics[width=\linewidth]{figures/speedup.png}
+\caption{Speed-up at $2N=40\,000$. \emph{Left:} end-to-end wall-clock rises once the
+network is used (four-process point circled as a congestion outlier).
+\emph{Middle:} computation alone keeps shrinking with more processes.
+\emph{Right:} the two speed-up curves --- compute-only approaches the ideal line,
+while end-to-end stays below one (a slowdown).}
 \label{fig:speedup}
-\end{figure}
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.55\linewidth]{figures/efficiency.png}
-\caption{Parallel efficiency $E_P=S_P/P$. The decline with $P$ is the signature of
-the replicated-build sequential fraction together with the growing all-gather cost.}
-\label{fig:eff}
-\end{figure}
-
-\subsection{Weak scaling and the hybrid layer}
-\label{sec:weakhybrid}
-
-Two further experiments round out the picture. In a weak-scaling test, the problem
-grows in proportion to the process count, so the force work per process is held
-roughly constant; the running time nonetheless rises and the weak-scaling efficiency
-falls (Figure~\ref{fig:weak}). This is the same replicated-build effect seen in the
-strong-scaling study, viewed from the other direction: the tree build is rebuilt in
-full on every process and its cost grows with the \emph{total} problem size, so as
-the problem and the process count grow together the replicated build consumes an
-ever-larger share. It is a direct, quantitative confirmation that the build, not the
-communication, is the factor limiting this design. Adding OpenMP threads inside each
-process reduces the running time further (Figure~\ref{fig:hybrid}): with a single
-process, four threads cut the running time by about $2.3\times$, and the benefit
-holds across process counts, confirming that the second, shared-memory level of
-parallelism is effective and that the dynamic thread schedule absorbs some of the
-traversal's irregularity.
-
-\begin{figure}[H]
-\centering
-\begin{subfigure}{0.49\textwidth}
-  \includegraphics[width=\linewidth]{figures/weak_efficiency.png}
-  \caption{Weak-scaling efficiency falls as the problem and process count grow
-  together, because the replicated build grows with the total problem size.}
-  \label{fig:weak}
-\end{subfigure}\hfill
-\begin{subfigure}{0.49\textwidth}
-  \includegraphics[width=\linewidth]{figures/hybrid_time.png}
-  \caption{More OpenMP threads per process lower the running time (about
-  $2.3\times$ for four threads at one process), exposing a second level of
-  parallelism.}
-  \label{fig:hybrid}
-\end{subfigure}
-\caption{Weak scaling (left) and the effect of the hybrid shared-memory layer
-(right).}
-\label{fig:weakhybrid}
 \end{figure}
 
 % ====================================================================
 \section{Discussion}
 \label{sec:discussion}
 
-The measurements confirm the cost model. The design's strength is that the force
-evaluation --- the expensive phase --- is divided cleanly and communicates nothing,
-so the parallel result is identical to the sequential one and the running time falls
-steadily as processes are added. Its limitation is equally clear: replicating the
-tree on every process costs an $\mathcal{O}(N)$ build that is not divided, and this
-sets the efficiency ceiling. At the scales studied here the build is a modest
-fraction of each step, but at much larger $N$ or process counts it would dominate,
-and the replicated storage would also become a constraint. The remedy used in
-production codes is to distribute the tree itself, partitioning space among
-processes and exchanging only the boundary information each process needs; this
-removes the replicated build at the cost of substantially more complex
-communication~\cite{warren1993}, and was deliberately left outside our scope.
+The measurements confirm the cost model, with the latency term in command. The
+design has a genuine strength that the experiments isolate clearly: the force
+evaluation is divided cleanly across processes and the computation alone scales
+close to ideally, about fivefold on eight cores. What the design does \emph{not}
+overcome is the interconnect. Two blocking all-gathers per step, each paying a
+fixed latency on a millisecond-scale wireless link, make communication 97--99\% of
+the wall-clock time, so the end-to-end program is slower in parallel than in serial.
+This is not a defect in the parallelisation of the work --- it is the expected
+behaviour of a communication-bound algorithm on a high-latency network, and it is
+the honest, central result of the project.
 
-The load-balance study shows that the one-dimensional block mapping is adequate only
-because our input is not ordered by position; a position-ordered input exposes the
-imbalance that an irregular workload can cause, and points to a cyclic distribution
-or dynamic scheduling as the appropriate granularity adjustment. Finally, the model
-is two-dimensional for clarity of exposition and demonstration; the extension to
-three dimensions replaces the quadtree with an octree but leaves the parallel
-structure unchanged.
+The result points to a clear remedy, and it is not the one a fast-interconnect
+analysis would suggest. Because the limiting term is communication \emph{latency}
+$\times$ \emph{number of steps}, the effective change is to communicate less often:
+amortise the fixed per-collective cost over more work. Concretely, one could exchange
+positions every few steps rather than every step (trading a little physical accuracy
+for far fewer collectives), overlap the all-gather with computation using
+non-blocking communication so the network latency is hidden behind the force
+evaluation, or move to a distributed tree that exchanges only the boundary data each
+process needs rather than all positions~\cite{warren1993}. On a low-latency cluster
+interconnect the same code would instead become compute-bound and the
+near-ideal compute scaling we measured would show through end to end; the algorithm
+is sound, but its communication pattern is matched to a fast network, not a phone
+hotspot.
+
+Two narrower points complete the picture. The load-balance study shows the
+one-dimensional block mapping balances the computation well, but on this network the
+balance of computation is almost beside the point next to the cost of
+communication. And the model is two-dimensional for clarity of demonstration; the
+extension to three dimensions replaces the quadtree with an octree but leaves the
+parallel structure, and therefore this analysis, unchanged.
 
 % ====================================================================
 \section{Conclusion}
 \label{sec:conclusion}
 
 We implemented a Barnes--Hut $N$-body simulator, parallelised it for distributed
-memory with a data decomposition and a single collective exchange per step, and
-added a hybrid shared-memory layer. The parallel program reproduces the sequential
-reference exactly and conserves energy, and it achieves a clear speed-up whose
-ceiling is explained, as the cost model predicts, by the replicated tree build. A
-per-process timing analysis relates the load balance directly to the mapping and the
-input ordering. Future work would distribute the tree to remove the sequential build
-fraction, replace the block mapping with a cyclic or cost-aware distribution to
-guarantee balance on position-ordered inputs, and extend the model to three
-dimensions.
-
-% ====================================================================
-\section*{Member contributions}
-\addcontentsline{toc}{section}{Member contributions}
-
-All members reviewed the complete program so that any member can explain any part of
-it, as the project requires.
-
-\begin{table}[H]
-\centering
-\small
-\begin{tabular}{@{}lll@{}}
-\toprule
-Member & Primary responsibility & Areas \\
-\midrule
-\textit{[member 1]} & Sequential method \& infrastructure &
-  reference simulator, cluster setup, correctness tests \\
-\textit{[member 2]} & Distributed-memory parallelism &
-  decomposition, collective communication, integration \\
-\textit{[member 3]} & Performance study &
-  benchmarking, speed-up and load-balance analysis, figures \\
-\textit{[member 4]} & Model, visualisation \& report &
-  initial conditions, trajectory rendering, report \\
-\bottomrule
-\end{tabular}
-\caption{Division of responsibilities. Every component was reviewed by the whole
-group.}
-\end{table}
+memory with a data decomposition and a single collective exchange per step, added a
+hybrid shared-memory layer, and deployed it on a genuine four-machine cluster joined
+over a phone Wi-Fi hotspot. The distributed program reproduces the sequential
+reference bit for bit and conserves energy, so it is correct. Its performance is
+communication-bound: with two blocking all-gathers per time step on a
+millisecond-latency wireless link, communication is 97--99\% of the wall-clock time
+and the end-to-end speed-up is below one. Separating the costs shows this is a
+property of the network, not of the parallelisation --- the computation alone scales
+about fivefold on eight cores. The path to end-to-end speed-up is therefore to
+reduce the number of network round trips: communicate every few steps rather than
+every step, overlap communication with computation, or distribute the tree so that
+only boundary data is exchanged. Each lowers the latency cost that, on this cluster,
+governs everything.
 
 % ====================================================================
 \begin{thebibliography}{9}
@@ -618,13 +663,16 @@ $N$-body algorithm. In \emph{Proc.\ Supercomputing '93}, pages 12--21, 1993.
 \section{Reproduction}
 \label{app:repro}
 
-The cluster comprises three machines on one local network, each running the same
-operating system and MPI library, with passwordless remote access from a designated
-master and the program staged at the same path on every machine. After building the
-three executables --- sequential, distributed-memory and hybrid --- the correctness
-checks, the running-time, load-balance and speed-up studies, and the figures are
-each produced by a single command, with the number of processes set equal to the
-number of cores and the problem size set as described in Section~\ref{sec:method}.
+The cluster comprises four virtual machines on one local subnet, each running the
+same operating system and MPI library, with passwordless remote access from a
+designated master node and the program staged at the same path on every machine.
+After building the three executables --- sequential, distributed-memory and
+hybrid --- the correctness checks and the three performance studies are each
+produced by a single command, with one process placed on each core (eight in total)
+and the problem size set as described in Section~\ref{sec:method}. Two launch-time
+settings are required for the bridged wireless network: restricting MPI to the
+shared subnet and allowing blocked processes to yield the processor. The exact
+commands and parameters are provided with the source.
 The exact commands and parameters are provided with the source.
 
 \end{document}

@@ -1,0 +1,33 @@
+# Cluster environment - captured 2026-06-24T13:04:35Z from node1 (this run)
+# Network: 4 laptops on a phone WiFi hotspot, one Ubuntu VM per laptop,
+#          VirtualBox Bridged Adapter (Promiscuous=Allow All). All nodes pingable (no AP isolation).
+# Cores: all nodes EQUAL = 2 physical cores each (1 thread/core). Total P = 8.
+
+--- node1
+hostname=node1
+ip=192.168.171.250
+os=Ubuntu 22.04.5 LTS
+mpi=mpirun (Open MPI) 4.1.2
+cores=2
+
+--- node2
+hostname=node2
+ip=192.168.171.176
+os=Ubuntu 22.04.5 LTS
+mpi=mpirun (Open MPI) 4.1.2
+cores=2
+
+--- node3
+hostname=node3
+ip=192.168.171.60
+os=Ubuntu 22.04.5 LTS
+mpi=mpirun (Open MPI) 4.1.2
+cores=2
+
+--- node4
+hostname=node4
+ip=192.168.171.112
+os=Ubuntu 22.04.5 LTS
+mpi=mpirun (Open MPI) 4.1.2
+cores=2
+
